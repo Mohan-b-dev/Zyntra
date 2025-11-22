@@ -4,8 +4,8 @@ import React, { useState } from "react";
 import { useWeb3 } from "@/context/Web3ContextV4";
 import WalletButton from "@/components/WalletButton";
 import RegistrationModal from "@/components/RegistrationModal";
-import Sidebar from "@/components/Sidebar";
-import ChatWindow from "@/components/ChatWindow";
+import SidebarV2 from "@/components/SidebarV2";
+import ChatWindowV2Enhanced from "@/components/ChatWindowV2Enhanced";
 import ContactsList from "@/components/ContactsList";
 import ProfileModal from "@/components/ProfileModal";
 import PopupToast from "@/components/PopupToast";
@@ -76,16 +76,16 @@ export default function HomePage() {
   }
 
   return (
-    <div className="h-screen bg-gray-950 flex flex-col overflow-hidden">
-      {/* Main Chat Interface */}
-      <div className="flex-1 flex overflow-hidden">
+    <div className="h-screen bg-gray-950 flex flex-col">
+      {/* Main Chat Interface - NO overflow-hidden to prevent clipping */}
+      <div className="flex-1 flex min-h-0">
         {/* Sidebar - Hidden on mobile when chat is selected */}
         <div
           className={`${
             isMobileView && selectedChat ? "hidden md:flex" : "flex"
           } md:flex`}
         >
-          <Sidebar
+          <SidebarV2
             onSelectChat={handleSelectChat}
             selectedChat={selectedChat}
             onOpenContacts={() => setShowContacts(true)}
@@ -95,11 +95,10 @@ export default function HomePage() {
 
         {/* Chat Window or Welcome Screen */}
         {selectedChat ? (
-          <div className={`${isMobileView || "hidden md:flex"} flex-1`}>
-            <ChatWindow
-              recipientAddress={selectedChat}
-              recipientName={selectedChatName}
-              onBack={handleBack}
+          <div className={`${isMobileView ? "flex" : "hidden md:flex"} flex-1`}>
+            <ChatWindowV2Enhanced
+              selectedChat={selectedChat}
+              selectedChatName={selectedChatName}
             />
           </div>
         ) : (

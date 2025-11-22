@@ -82,7 +82,7 @@ export default function ChatWindow({
   return (
     <div className="flex-1 flex flex-col bg-gray-900 h-full">
       {/* Chat Header */}
-      <div className="bg-gray-800 p-4 border-b border-gray-700 flex items-center space-x-3">
+      <div className="bg-gray-800 px-4 py-6 border-b border-gray-700 flex items-center space-x-3">
         <button
           onClick={onBack}
           className="md:hidden p-2 hover:bg-gray-700 rounded-full transition-colors"

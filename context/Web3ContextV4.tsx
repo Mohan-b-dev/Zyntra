@@ -757,6 +757,7 @@ interface UserProfile {
 
 interface PrivateMessage {
   sender: string;
+  recipient: string; // Added to track message recipient
   content: string;
   timestamp: bigint;
   isRead: boolean;
@@ -883,6 +884,8 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
     setError(null);
 
     try {
+      console.log("🔗 [CONNECT] Starting wallet connection...");
+
       if (typeof window.ethereum === "undefined") {
         throw new Error(
           "MetaMask is not installed. Please install MetaMask to use this app."
@@ -896,11 +899,22 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
         throw new Error("No accounts found. Please unlock MetaMask.");
       }
 
+      console.log(
+        "✅ [CONNECT] Wallet connected:",
+        accounts[0].slice(0, 10) + "..."
+      );
+
       // Check and switch to Celo Sepolia network
       const CELO_SEPOLIA_CHAIN_ID = 11142220;
       const network = await browserProvider.getNetwork();
 
+      console.log("🌐 [CONNECT] Current network:", {
+        chainId: network.chainId.toString(),
+        name: network.name,
+      });
+
       if (network.chainId !== BigInt(CELO_SEPOLIA_CHAIN_ID)) {
+        console.log("⚠️ [CONNECT] Wrong network. Switching to Celo Sepolia...");
         try {
           await window.ethereum.request({
             method: "wallet_switchEthereumChain",
@@ -908,6 +922,7 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
           });
         } catch (switchError: any) {
           if (switchError.code === 4902) {
+            console.log("➕ [CONNECT] Adding Celo Sepolia to MetaMask...");
             try {
               await window.ethereum.request({
                 method: "wallet_addEthereumChain",
@@ -932,10 +947,15 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
             throw switchError;
           }
         }
+        console.log("✅ [CONNECT] Network switched to Celo Sepolia");
       }
 
       const signer = await browserProvider.getSigner();
       const userAddress = await signer.getAddress();
+
+      console.log("📝 [CONNECT] Creating contract instance...");
+      console.log("📍 [CONNECT] Contract Address:", CONTRACT_ADDRESS);
+      console.log("👤 [CONNECT] User Address:", userAddress);
 
       const contractInstance = new Contract(
         CONTRACT_ADDRESS,
@@ -943,9 +963,32 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
         signer
       );
 
+      // Verify contract connection
+      try {
+        const totalUsers = await contractInstance.getTotalUsers();
+        console.log(
+          "✅ [CONNECT] Contract verified. Total users:",
+          totalUsers.toString()
+        );
+      } catch (verifyError) {
+        console.error(
+          "❌ [CONNECT] Contract verification failed:",
+          verifyError
+        );
+        throw new Error(
+          "Failed to verify contract connection. Check contract address."
+        );
+      }
+
       setProvider(browserProvider);
       setAccount(userAddress);
       setContract(contractInstance);
+
+      console.log("🎉 [CONNECT] Connection complete! Provider type: HTTP RPC");
+      console.log("ℹ️ [CONNECT] Using polling for updates (5s intervals)");
+      console.log(
+        "⚠️ [CONNECT] WebSocket events not supported with current provider"
+      );
 
       localStorage.setItem("walletConnected", "true");
     } catch (err: any) {
@@ -1005,20 +1048,42 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
     status: string = "Hey there! I'm using ChatDApp"
   ): Promise<boolean> => {
     if (!contract) {
+      console.error("❌ [REGISTER] Contract not initialized");
       setError("Contract not initialized");
       return false;
     }
 
+    console.log("📝 [REGISTER] Attempting to register user...");
+    console.log("   Username:", username);
+    console.log("   Avatar URL:", avatarUrl || "(none)");
+    console.log("   Status:", status);
+
     try {
       setError(null);
+
+      console.log("🔄 [REGISTER] Sending transaction...");
       // V4 contract takes all 3 parameters in registerUser
       const tx = await contract.registerUser(username, avatarUrl, status);
-      await tx.wait();
+
+      console.log("✅ [REGISTER] Transaction submitted:", tx.hash);
+      console.log("⏳ [REGISTER] Waiting for confirmation...");
+
+      const receipt = await tx.wait();
+
+      console.log("✅ [REGISTER] Registration confirmed!");
+      console.log("📦 [REGISTER] Block number:", receipt.blockNumber);
+      console.log("⛽ [REGISTER] Gas used:", receipt.gasUsed.toString());
 
       await checkUserRegistration();
       return true;
     } catch (err: any) {
-      console.error("Error registering user:", err);
+      console.error("❌ [REGISTER] Registration failed:", err);
+      console.error("❌ [REGISTER] Error details:", {
+        code: err.code,
+        reason: err.reason,
+        message: err.message,
+      });
+
       if (err.message.includes("UserAlreadyRegistered")) {
         setError("This wallet is already registered");
       } else if (err.message.includes("UsernameTaken")) {
@@ -1028,7 +1093,7 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
       } else if (err.message.includes("UsernameTooLong")) {
         setError("Username too long (max 20 characters)");
       } else {
-        setError(err.message || "Failed to register user");
+        setError(err.reason || err.message || "Failed to register user");
       }
       return false;
     }
@@ -1061,7 +1126,27 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
       if (!contract) return [];
 
       try {
-        const userAddresses = await contract.getRegisteredUsers(offset, limit);
+        // First check total users count
+        const totalUsers = await contract.getTotalUsers();
+        const total = Number(totalUsers);
+
+        if (total === 0) {
+          console.log("No registered users yet");
+          return [];
+        }
+
+        // Adjust limit if it exceeds remaining users
+        const adjustedLimit = Math.min(limit, total - offset);
+
+        if (adjustedLimit <= 0 || offset >= total) {
+          console.log("No users in this range");
+          return [];
+        }
+
+        const userAddresses = await contract.getRegisteredUsers(
+          offset,
+          adjustedLimit
+        );
         const users: UserProfile[] = [];
 
         for (const address of userAddresses) {
@@ -1104,100 +1189,216 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
   };
 
   const loadUserChats = useCallback(async () => {
-    if (!contract || !account) return;
+    if (!contract || !account) {
+      console.warn("⚠️ [LOAD_CHATS] Contract or account not available");
+      return;
+    }
 
+    console.log("📋 [LOAD_CHATS] Loading user chats...");
     setIsLoadingChats(true);
     try {
-      // GAS OPTIMIZED: Get all users at once
+      // Get all users
       const allUsers = await getAllUsers(0, 100);
+      console.log(`📋 [LOAD_CHATS] Found ${allUsers.length} registered users`);
+
+      if (allUsers.length === 0) {
+        console.log("No other users registered yet");
+        setUserChats([]);
+        setIsLoadingChats(false);
+        return;
+      }
+
       const chatsWithMessages: ChatInfo[] = [];
 
-      // Use Promise.all for parallel calls (faster)
-      const chatPromises = allUsers.map(async (user) => {
+      // Check each user for messages
+      for (const user of allUsers) {
         try {
-          // Use getChatId directly (cheaper than getAddressByUsername)
           const userAddress = await contract.getAddressByUsername(
             user.username
           );
 
-          // Get message count
-          const result = await contract.getPrivateMessages(userAddress, 0, 1);
-          const messages = Array.isArray(result) ? result[0] : result;
-          const total = Array.isArray(result) ? result[1] : 0;
+          // Get messages with this user
+          const result = await contract.getPrivateMessages(userAddress, 0, 50);
+          const messages = Array.isArray(result) ? result[0] : [];
+          const total = Array.isArray(result) ? Number(result[1]) : 0;
 
-          if (Number(total) > 0 && messages.length > 0) {
+          // Only add to chat list if there are messages
+          if (total > 0 && messages.length > 0) {
+            // Get the LAST message (most recent)
             const lastMsg = messages[messages.length - 1];
 
-            return {
+            chatsWithMessages.push({
               address: userAddress,
               username: user.username,
               avatarUrl: user.avatarUrl,
               lastMessage: lastMsg.isDeleted
-                ? "This message was deleted"
+                ? "🚫 This message was deleted"
                 : lastMsg.content,
               lastMessageTime: Number(lastMsg.timestamp),
-              unreadCount: 0,
-            };
+              unreadCount: 0, // TODO: Implement unread counting
+            });
           }
-          return null;
         } catch (err) {
           console.error(`Error loading chat for ${user.username}:`, err);
-          return null;
         }
-      });
+      }
 
-      const results = await Promise.all(chatPromises);
+      // Sort by most recent first
+      chatsWithMessages.sort((a, b) => b.lastMessageTime - a.lastMessageTime);
 
-      // Filter out nulls and sort
-      const validChats = results.filter(
-        (chat): chat is ChatInfo => chat !== null
+      console.log(
+        `✅ [LOAD_CHATS] Loaded ${chatsWithMessages.length} chats with messages`
       );
-      validChats.sort((a, b) => b.lastMessageTime - a.lastMessageTime);
-
-      setUserChats(validChats);
+      setUserChats(chatsWithMessages);
     } catch (err: any) {
-      console.error("Error loading chats:", err);
+      console.error("❌ [LOAD_CHATS] Error loading chats:", err);
+      console.error("❌ [LOAD_CHATS] Error details:", {
+        code: err.code,
+        reason: err.reason,
+        message: err.message,
+      });
+      setUserChats([]);
     } finally {
       setIsLoadingChats(false);
     }
   }, [contract, account, getAllUsers]);
 
   const loadChatMessages = useCallback(
-    async (otherUser: string) => {
-      if (!contract) return;
+    async (otherUser: string, keepOptimistic: boolean = false) => {
+      if (!contract || !account) {
+        console.warn("⚠️ [LOAD_MESSAGES] Contract or account not available");
+        console.warn("   Contract:", !!contract);
+        console.warn("   Account:", account);
+        return;
+      }
 
       setIsLoadingMessages(true);
+      console.log(
+        `📥 [LOAD_MESSAGES] Loading messages with ${otherUser.slice(0, 10)}...`
+      );
+      console.log(`   Current account: ${account.slice(0, 10)}...`);
+      console.log(`   Other user: ${otherUser.slice(0, 10)}...`);
+      console.log(`   Keep optimistic: ${keepOptimistic}`);
+
       try {
-        // V4 returns tuple: [messages, total]
-        const result = await contract.getPrivateMessages(otherUser, 0, 100);
+        // V4 contract has PAGINATION_LIMIT = 50, so use limit of 50 instead of 100
+        console.log(
+          "🔄 [LOAD_MESSAGES] Calling contract.getPrivateMessages(offset=0, limit=50)..."
+        );
+        const result = await contract.getPrivateMessages(otherUser, 0, 50);
 
         // Handle the tuple return [messages, total]
         const messages = Array.isArray(result) ? result[0] : result;
+        const total = Array.isArray(result) ? result[1] : messages.length;
+
+        console.log(
+          `✅ [LOAD_MESSAGES] Received ${
+            messages.length
+          } messages (total: ${total.toString()})`
+        );
+
+        if (messages.length === 0 && !keepOptimistic) {
+          console.log("ℹ️ [LOAD_MESSAGES] No messages found for this chat");
+          setPrivateMessages([]);
+          setIsLoadingMessages(false);
+          return;
+        }
 
         // Convert messageType from uint8 to string and format timestamps
-        const formattedMessages = messages.map((msg: any) => ({
-          sender: msg.sender,
-          content: msg.content,
-          timestamp: BigInt(msg.timestamp), // Keep as bigint for consistency
-          isRead: msg.isRead,
-          isDeleted: msg.isDeleted,
-          messageType:
-            msg.messageType === 1
-              ? "image"
-              : msg.messageType === 2
-              ? "file"
-              : "text",
-        }));
+        // The contract returns messages between account and otherUser
+        const formattedMessages = messages.map((msg: any, index: number) => {
+          // Determine recipient based on sender
+          const recipient =
+            msg.sender.toLowerCase() === account.toLowerCase()
+              ? otherUser
+              : account;
 
-        setPrivateMessages(formattedMessages);
+          const formatted = {
+            sender: msg.sender,
+            recipient: recipient, // Add recipient field
+            content: msg.content,
+            timestamp: BigInt(msg.timestamp), // Keep as bigint for consistency
+            isRead: msg.isRead,
+            isDeleted: msg.isDeleted,
+            messageType:
+              msg.messageType === 1
+                ? "image"
+                : msg.messageType === 2
+                ? "file"
+                : "text",
+          };
+
+          console.log(`   Message ${index + 1}:`, {
+            from: formatted.sender.slice(0, 10) + "...",
+            to: formatted.recipient.slice(0, 10) + "...",
+            content:
+              formatted.content.slice(0, 30) +
+              (formatted.content.length > 30 ? "..." : ""),
+            time: new Date(
+              Number(formatted.timestamp) * 1000
+            ).toLocaleTimeString(),
+          });
+
+          return formatted;
+        });
+
+        console.log(
+          `✅ [LOAD_MESSAGES] Formatted ${formattedMessages.length} messages for display`
+        );
+        console.log(`✅ [LOAD_MESSAGES] Setting privateMessages state...`);
+
+        // If keepOptimistic, preserve optimistic messages that aren't in blockchain yet
+        if (keepOptimistic) {
+          setPrivateMessages((prev) => {
+            // Find optimistic messages (very recent timestamps that aren't in formattedMessages)
+            const now = BigInt(Math.floor(Date.now() / 1000));
+            const optimisticMessages = prev.filter((msg) => {
+              // Optimistic if timestamp is within last 60 seconds and not in blockchain data
+              const isRecent = now - msg.timestamp < 60;
+              const notInBlockchain = !formattedMessages.some(
+                (bMsg: PrivateMessage) =>
+                  bMsg.content === msg.content &&
+                  bMsg.sender.toLowerCase() === msg.sender.toLowerCase()
+              );
+              return isRecent && notInBlockchain;
+            });
+
+            console.log(
+              `ℹ️ [LOAD_MESSAGES] Keeping ${optimisticMessages.length} optimistic messages`
+            );
+            return [...formattedMessages, ...optimisticMessages];
+          });
+        } else {
+          setPrivateMessages(formattedMessages);
+        }
+
+        console.log(`✅ [LOAD_MESSAGES] State updated successfully`);
       } catch (err: any) {
-        console.error("Error loading messages:", err);
-        setError("Failed to load messages");
+        console.error("❌ [LOAD_MESSAGES] Error loading messages:", err);
+        console.error("❌ [LOAD_MESSAGES] Error details:", {
+          code: err.code,
+          reason: err.reason,
+          message: err.message,
+        });
+
+        // Check for specific errors
+        if (err.reason === "InvalidPagination()") {
+          console.error(
+            "❌ [LOAD_MESSAGES] InvalidPagination - contract limit is 50 messages per call"
+          );
+          setError("Failed to load messages: Pagination limit exceeded");
+        } else {
+          setError("Failed to load messages: " + (err.reason || err.message));
+        }
+
+        if (!keepOptimistic) {
+          setPrivateMessages([]); // Clear messages on error only if not keeping optimistic
+        }
       } finally {
         setIsLoadingMessages(false);
       }
     },
-    [contract]
+    [contract, account]
   );
 
   const sendPrivateMessage = async (
@@ -1206,26 +1407,57 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
     messageType: string = "text"
   ): Promise<boolean> => {
     if (!contract || !account) {
+      console.error("❌ [SEND_MSG] Contract or account not initialized");
       setError("Contract not initialized");
       return false;
     }
 
+    console.log(
+      `📤 [SEND_MSG] Preparing to send message to ${recipient.slice(0, 10)}...`
+    );
+    console.log(
+      `📤 [SEND_MSG] Content: "${content.slice(0, 50)}${
+        content.length > 50 ? "..." : ""
+      }"`
+    );
+    console.log(`📤 [SEND_MSG] Type: ${messageType}`);
+
     try {
       setError(null);
 
+      // Check if user is registered first
+      if (!isUserRegistered) {
+        console.error("❌ [SEND_MSG] User not registered");
+        setError("You must register before sending messages");
+        return false;
+      }
+
+      // Verify recipient is a valid address
+      if (
+        !recipient ||
+        recipient === "0x0000000000000000000000000000000000000000"
+      ) {
+        console.error("❌ [SEND_MSG] Invalid recipient address");
+        setError("Invalid recipient address");
+        return false;
+      }
+
+      console.log("✅ [SEND_MSG] Pre-flight checks passed");
+
       // OPTIMISTIC UI: Add message immediately before blockchain confirmation
-      const optimisticMessage = {
+      const optimisticMessage: PrivateMessage = {
         sender: account,
+        recipient: recipient, // Add recipient field
         content: content,
         timestamp: BigInt(Math.floor(Date.now() / 1000)),
         isRead: false,
         isDeleted: false,
         messageType: messageType,
-        isPending: true, // Flag for optimistic message
       };
 
       // Add to UI immediately
       if (selectedChat === recipient) {
+        console.log("💬 [SEND_MSG] Adding optimistic message to UI");
         setPrivateMessages((prev) => [...prev, optimisticMessage]);
       }
 
@@ -1234,6 +1466,8 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
       if (messageType === "image") messageTypeInt = 1;
       else if (messageType === "file") messageTypeInt = 2;
 
+      console.log("🔄 [SEND_MSG] Sending transaction to blockchain...");
+
       // Send to blockchain
       const tx = await contract.sendPrivateMessage(
         recipient,
@@ -1241,33 +1475,63 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
         messageTypeInt
       );
 
+      console.log("✅ [SEND_MSG] Transaction submitted!");
+      console.log("📍 [SEND_MSG] Transaction hash:", tx.hash);
+      console.log("⏳ [SEND_MSG] Waiting for confirmation...");
+
       // Wait for confirmation in background, don't block UI
       tx.wait()
-        .then(() => {
-          // Reload to get actual data with correct timestamp
-          if (selectedChat === recipient) {
-            loadChatMessages(recipient);
-          }
+        .then((receipt: any) => {
+          console.log("✅ [SEND_MSG] Transaction confirmed!");
+          console.log("📦 [SEND_MSG] Block number:", receipt.blockNumber);
+          console.log("⛽ [SEND_MSG] Gas used:", receipt.gasUsed.toString());
+
+          // DON'T reload messages immediately - keep optimistic UI
+          // Polling will update with blockchain data in ~10 seconds
+          // This prevents the "message disappearing" effect
+          console.log("ℹ️ [SEND_MSG] Message confirmed on blockchain");
+          console.log(
+            "ℹ️ [SEND_MSG] Polling will update with blockchain timestamp shortly"
+          );
+
+          console.log("🔄 [SEND_MSG] Reloading sidebar");
           loadUserChats();
         })
         .catch((err: any) => {
-          console.error("Transaction failed:", err);
+          console.error("❌ [SEND_MSG] Transaction failed:", err);
+          console.error("❌ [SEND_MSG] Error details:", {
+            code: err.code,
+            reason: err.reason,
+            message: err.message,
+          });
+
           // Remove optimistic message on failure
           setPrivateMessages((prev) =>
-            prev.filter((msg: any) => !msg.isPending)
+            prev.filter(
+              (msg: any) => msg.timestamp !== optimisticMessage.timestamp
+            )
           );
-          setError("Message failed to send");
+          setError("Message failed to send: " + (err.reason || err.message));
         });
 
       return true;
     } catch (err: any) {
-      console.error("Error sending message:", err);
+      console.error("❌ [SEND_MSG] Error sending message:", err);
+      console.error("❌ [SEND_MSG] Error details:", {
+        code: err.code,
+        reason: err.reason,
+        message: err.message,
+        data: err.data,
+      });
 
       // Remove optimistic message on error
       setPrivateMessages((prev: any[]) =>
-        prev.filter((msg: any) => !msg.isPending)
+        prev.filter(
+          (msg: any) => msg.timestamp !== BigInt(Math.floor(Date.now() / 1000))
+        )
       );
 
+      // Parse custom contract errors
       if (err.message.includes("RateLimitExceeded")) {
         setError("Please wait before sending another message");
       } else if (err.message.includes("MessageTooLong")) {
@@ -1275,7 +1539,9 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
       } else if (err.message.includes("MessageEmpty")) {
         setError("Message cannot be empty");
       } else if (err.message.includes("UserNotRegistered")) {
-        setError("Recipient is not registered");
+        setError("You or the recipient is not registered");
+      } else if (err.reason) {
+        setError("Failed to send: " + err.reason);
       } else {
         setError(err.message || "Failed to send message");
       }
@@ -1373,12 +1639,8 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
     }
   }, [isUserRegistered, loadUserChats]);
 
-  // Load messages when chat selected
-  useEffect(() => {
-    if (selectedChat && contract) {
-      loadChatMessages(selectedChat);
-    }
-  }, [selectedChat, contract]);
+  // Note: Messages are loaded in ChatWindowV2 component when chat is selected
+  // to have better control over loading state and filtering
 
   // Account/network change listeners
   useEffect(() => {
@@ -1410,32 +1672,42 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
     };
   }, [account]);
 
-  // POLLING: Check for new messages every 5 seconds (since HTTP RPC doesn't support events)
+  // POLLING: Check for new messages every 10 seconds (reduced from 5s to prevent RPC overload)
   useEffect(() => {
     if (!contract || !account || !isUserRegistered) return;
 
-    console.log("Starting message polling...");
+    console.log("🔄 [POLLING] Starting message polling (10s intervals)...");
 
     // Initial load
     loadUserChats();
 
-    // Poll every 5 seconds
+    // Poll every 10 seconds (reduced from 5s to prevent RPC rate limiting)
     const pollInterval = setInterval(async () => {
       try {
+        console.log("🔄 [POLLING] Fetching updates...");
+
         // Reload chat list to catch new messages
         await loadUserChats();
 
-        // If viewing a chat, reload its messages
+        // If viewing a chat, reload its messages (keeping optimistic messages)
         if (selectedChat) {
-          await loadChatMessages(selectedChat);
+          await loadChatMessages(selectedChat, true); // Keep optimistic messages
         }
-      } catch (err) {
-        console.error("Polling error:", err);
+
+        console.log("✅ [POLLING] Update complete");
+      } catch (err: any) {
+        console.error("❌ [POLLING] Error during polling:", err);
+        // If we get rate limited, log it but don't crash
+        if (err.code === -32002 || err.message?.includes("rate limit")) {
+          console.warn(
+            "⚠️ [POLLING] Rate limited by RPC, will retry next interval"
+          );
+        }
       }
-    }, 5000); // 5 seconds
+    }, 10000); // 10 seconds (reduced from 5s)
 
     return () => {
-      console.log("Stopping message polling...");
+      console.log("🛑 [POLLING] Stopping message polling");
       clearInterval(pollInterval);
     };
   }, [
@@ -1447,99 +1719,20 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
     loadChatMessages,
   ]);
 
-  // EVENT LISTENER: Try to listen for events (works with WebSocket providers)
+  // EVENT LISTENER: DISABLED for HTTP RPC to prevent eth_newFilter errors
+  // HTTP RPC providers don't support event listening, use polling instead
   useEffect(() => {
     if (!contract || !account) return;
 
-    console.log("Setting up event listener...");
+    console.log("⚠️ [EVENTS] Event listener disabled for HTTP RPC provider");
+    console.log("ℹ️ [EVENTS] Using polling (5s intervals) for updates instead");
+    console.log("ℹ️ [EVENTS] This prevents 'eth_newFilter' RPC errors");
 
-    const handleNewMessage = async (
-      chatId: string,
-      sender: string,
-      recipient: string,
-      messageIndex: bigint,
-      timestamp: bigint,
-      preview: string
-    ) => {
-      const senderLower = sender.toLowerCase();
-      const recipientLower = recipient.toLowerCase();
-      const accountLower = account.toLowerCase();
+    // Don't try to set up event listeners with HTTP RPC
+    // The polling mechanism handles all updates
 
-      console.log("🔔 New message event received:", {
-        sender: sender.slice(0, 10),
-        recipient: recipient.slice(0, 10),
-        preview,
-      });
-
-      // Check if this message is for current user (either sent or received)
-      const isForCurrentUser =
-        senderLower === accountLower || recipientLower === accountLower;
-
-      if (!isForCurrentUser) return;
-
-      // If we're the receiver and not currently viewing this chat, show popup
-      if (
-        recipientLower === accountLower &&
-        selectedChat?.toLowerCase() !== senderLower
-      ) {
-        console.log("📬 Showing notification for new message");
-        // Get sender username for the notification
-        try {
-          const [username] = await contract.getUserProfile(sender);
-          addToast({
-            type: "private",
-            sender: username || sender.slice(0, 10),
-            preview: preview || "New message",
-            timestamp: Date.now(),
-          });
-        } catch (err) {
-          console.error("Error getting sender profile:", err);
-          addToast({
-            type: "private",
-            sender: sender.slice(0, 10),
-            preview: preview || "New message",
-            timestamp: Date.now(),
-          });
-        }
-      }
-
-      // Reload messages if we're viewing this chat
-      const otherUser = senderLower === accountLower ? recipient : sender;
-      if (selectedChat?.toLowerCase() === otherUser.toLowerCase()) {
-        console.log("💬 Reloading messages for active chat");
-        await loadChatMessages(otherUser);
-      }
-
-      // Always reload chat list to update sidebar
-      console.log("📝 Reloading sidebar");
-      await loadUserChats();
-    };
-
-    // Try to listen for events (may not work with HTTP RPC)
-    try {
-      const filter = contract.filters.PrivateMessageSent();
-      contract.on(filter, handleNewMessage);
-      console.log("✅ Event listener active");
-
-      return () => {
-        console.log("🔴 Removing event listener");
-        contract.off(filter, handleNewMessage);
-      };
-    } catch (err) {
-      console.warn(
-        "⚠️ Event listener not supported (using polling instead):",
-        err
-      );
-      return undefined;
-    }
-  }, [
-    contract,
-    account,
-    selectedChat,
-    addToast,
-    loadChatMessages,
-    loadUserChats,
-  ]);
+    return undefined;
+  }, [contract, account]);
 
   return (
     <Web3Context.Provider

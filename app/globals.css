@@ -2,6 +2,9 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Glass-morphism styles */
+@import "../styles/glassmorphism.css";
+
 :root {
   --foreground-rgb: 255, 255, 255;
   --background-start-rgb: 0, 0, 0;
@@ -17,6 +20,7 @@ body {
     )
     rgb(var(--background-start-rgb));
   min-height: 100vh;
+  overflow-x: hidden;
 }
 
 @layer utilities {
@@ -33,6 +37,12 @@ body {
   body {
     @apply bg-gradient-to-br from-black via-gray-900 to-gray-800 text-gray-100;
   }
+  
+  /* Ensure proper stacking context */
+  #__next {
+    position: relative;
+    z-index: 0;
+  }
 }
 
 @layer components {
@@ -43,8 +53,18 @@ body {
   .glass-light {
     @apply bg-gray-800/40 backdrop-blur-lg rounded-2xl border border-gray-700/30;
   }
+  
+  /* Enhanced header visibility */
+  .chat-header {
+    @apply bg-gradient-to-r from-gray-900/90 via-gray-800/90 to-gray-900/90;
+    @apply backdrop-blur-xl border-b border-gray-700/50;
+    @apply shadow-2xl;
+    position: relative;
+    z-index: 40;
+  }
 }
 
+/* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -52,16 +72,26 @@ body {
 
 ::-webkit-scrollbar-track {
   @apply bg-gray-900/50;
+  border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb {
-  @apply bg-gray-700/50 rounded-full;
+  @apply bg-gray-700/50;
+  border-radius: 4px;
+  transition: background-color 0.2s ease;
 }
 
 ::-webkit-scrollbar-thumb:hover {
   @apply bg-gray-600/70;
 }
 
+/* Firefox scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(55, 65, 81, 0.5) rgba(17, 24, 39, 0.5);
+}
+
+/* Animation classes */
 .animate-fadeIn {
   animation: fadeIn 0.3s ease-in-out;
 }
@@ -75,4 +105,63 @@ body {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+.animate-slideIn {
+  animation: slideIn 0.4s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Safe area support for mobile devices */
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Ensure headers are always visible */
+[class*="chat-header"],
+[class*="header"] {
+  margin-top: 0 !important;
+  position: relative;
+  min-height: 64px;
+}
+
+/* Ensure all interactive elements are properly layered */
+button, a, input, textarea, select {
+  position: relative;
+  z-index: 1;
+}
+
+/* Prevent text selection on buttons */
+button {
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+}
+
+/* Smooth transitions for all elements */
+* {
+  transition-property: background-color, border-color, color, fill, stroke, opacity, box-shadow, transform;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 150ms;
+}
+
+/* Override transitions for animations that need to be instant */
+.no-transition,
+.no-transition * {
+  transition: none !important;
 }

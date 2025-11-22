@@ -17,6 +17,8 @@ interface MessagesListProps {
   messages: Message[];
   currentUserAddress: string;
   recipientAddress: string;
+  isLoading?: boolean;
+  messagesLoaded?: boolean;
   onDelete?: (index: number) => void;
   onReact?: (index: number, emoji: string) => void;
 }
@@ -25,6 +27,8 @@ export default function MessagesList({
   messages,
   currentUserAddress,
   recipientAddress,
+  isLoading = false,
+  messagesLoaded = false,
   onDelete,
   onReact,
 }: MessagesListProps) {
@@ -76,14 +80,31 @@ export default function MessagesList({
 
   const groupedMessages = groupMessagesByDate();
 
-  // Fallback for empty messages
-  if (!messages || messages.length === 0) {
+  // Loading / empty states handled by parent; show spinner or empty message based on props
+  if (isLoading && !messagesLoaded) {
+    return (
+      <div className="flex-1 flex items-center justify-center p-8">
+        <div className="text-center text-gray-400">
+          <motion.div
+            animate={{ rotate: 360 }}
+            transition={{ duration: 1, repeat: Infinity }}
+            className="mx-auto mb-4"
+          >
+            💬
+          </motion.div>
+          <p className="text-sm">Loading messages...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if ((messages || []).length === 0 && messagesLoaded) {
     return (
       <div className="flex-1 flex items-center justify-center p-8">
         <div className="text-center">
           <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-glass-dark border border-neon-purple/20 flex items-center justify-center">
             <motion.div
-              animate={{ scale: [1, 1.1, 1] }}
+              animate={{ scale: [1, 1.05, 1] }}
               transition={{ duration: 2, repeat: Infinity }}
             >
               💬
