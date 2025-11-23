@@ -379,7 +379,10 @@ export default function ChatWindowV2Enhanced({
             aria-label="More Options"
             style={{ opacity: 1, visibility: "visible" }}
           >
-            <MoreVertical className="w-4.5 h-4.5 text-gray-300" strokeWidth={2.5} />
+            <MoreVertical
+              className="w-4.5 h-4.5 text-gray-300"
+              strokeWidth={2.5}
+            />
           </motion.button>
         </div>
       </div>
