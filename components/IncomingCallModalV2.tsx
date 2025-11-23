@@ -1,8 +1,9 @@
 "use client";
 
 import { motion, AnimatePresence } from "framer-motion";
-import { Phone, PhoneOff, Video } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Phone, Video, X, PhoneOff } from "lucide-react";
+import { useState, useEffect } from "react";
+import { useCallRingtone } from "@/hooks/useCallRingtone";
 
 interface IncomingCallModalV2Props {
   isOpen: boolean;
@@ -43,7 +44,7 @@ export default function IncomingCallModalV2({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/80 backdrop-blur-md z-50"
+            className="fixed inset-0 bg-black/80 backdrop-blur-md z-[90]"
           />
 
           {/* Call Modal */}
@@ -52,7 +53,7 @@ export default function IncomingCallModalV2({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.9, y: 20 }}
             transition={{ type: "spring", damping: 25 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            className="fixed inset-0 z-[90] flex items-center justify-center p-4"
           >
             <div className="bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 rounded-3xl shadow-2xl border border-white/10 p-8 max-w-md w-full">
               {/* Call Type Icon */}

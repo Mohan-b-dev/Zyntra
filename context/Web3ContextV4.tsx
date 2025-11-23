@@ -755,7 +755,7 @@ interface UserProfile {
   isRegistered: boolean;
 }
 
-interface PrivateMessage {
+export interface PrivateMessage {
   sender: string;
   recipient: string; // Added to track message recipient
   content: string;
@@ -763,6 +763,9 @@ interface PrivateMessage {
   isRead: boolean;
   isDeleted: boolean;
   messageType: string;
+  deliveryStatus?: "sending" | "sent" | "delivered" | "read"; // WhatsApp-style delivery lifecycle
+  messageId?: string;
+  txHash?: string; // Transaction hash for tracking
 }
 
 interface ChatInfo {
@@ -815,7 +818,7 @@ interface Web3ContextType {
     recipient: string,
     content: string,
     type?: string
-  ) => Promise<boolean>;
+  ) => Promise<{ success: boolean; txHash?: string }>;
   markMessageAsRead: (chatId: string, messageIndex: number) => Promise<boolean>;
   deleteMessage: (chatId: string, messageIndex: number) => Promise<boolean>;
   addReaction: (
@@ -824,6 +827,10 @@ interface Web3ContextType {
     emoji: string
   ) => Promise<boolean>;
   loadChatMessages: (otherUser: string) => Promise<void>;
+  updateMessageStatus: (
+    txHash: string,
+    status: "sending" | "sent" | "delivered" | "read"
+  ) => void;
 
   // Utils
   refreshData: () => Promise<void>;
@@ -1326,6 +1333,15 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
                 : msg.messageType === 2
                 ? "file"
                 : "text",
+            // Messages loaded from blockchain are already delivered
+            // If marked as read in contract, set to "read", otherwise "delivered"
+            deliveryStatus: (msg.isRead ? "read" : "delivered") as
+              | "sending"
+              | "sent"
+              | "delivered"
+              | "read",
+            messageId: `blockchain-${msg.sender}-${msg.timestamp}`,
+            txHash: `blockchain-${msg.sender}-${msg.timestamp}`, // Generate consistent ID for blockchain messages
           };
 
           console.log(`   Message ${index + 1}:`, {
@@ -1337,6 +1353,7 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
             time: new Date(
               Number(formatted.timestamp) * 1000
             ).toLocaleTimeString(),
+            status: formatted.deliveryStatus,
           });
 
           return formatted;
@@ -1405,11 +1422,11 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
     recipient: string,
     content: string,
     messageType: string = "text"
-  ): Promise<boolean> => {
+  ): Promise<{ success: boolean; txHash?: string }> => {
     if (!contract || !account) {
       console.error("❌ [SEND_MSG] Contract or account not initialized");
       setError("Contract not initialized");
-      return false;
+      return { success: false };
     }
 
     console.log(
@@ -1429,7 +1446,7 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
       if (!isUserRegistered) {
         console.error("❌ [SEND_MSG] User not registered");
         setError("You must register before sending messages");
-        return false;
+        return { success: false };
       }
 
       // Verify recipient is a valid address
@@ -1439,27 +1456,10 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
       ) {
         console.error("❌ [SEND_MSG] Invalid recipient address");
         setError("Invalid recipient address");
-        return false;
+        return { success: false };
       }
 
       console.log("✅ [SEND_MSG] Pre-flight checks passed");
-
-      // OPTIMISTIC UI: Add message immediately before blockchain confirmation
-      const optimisticMessage: PrivateMessage = {
-        sender: account,
-        recipient: recipient, // Add recipient field
-        content: content,
-        timestamp: BigInt(Math.floor(Date.now() / 1000)),
-        isRead: false,
-        isDeleted: false,
-        messageType: messageType,
-      };
-
-      // Add to UI immediately
-      if (selectedChat === recipient) {
-        console.log("💬 [SEND_MSG] Adding optimistic message to UI");
-        setPrivateMessages((prev) => [...prev, optimisticMessage]);
-      }
 
       // Convert messageType string to uint8: 0=text, 1=image, 2=file
       let messageTypeInt: number = 0;
@@ -1478,6 +1478,28 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
       console.log("✅ [SEND_MSG] Transaction submitted!");
       console.log("📍 [SEND_MSG] Transaction hash:", tx.hash);
       console.log("⏳ [SEND_MSG] Waiting for confirmation...");
+
+      const messageId = tx.hash;
+      console.log("🆔 [SEND_MSG] MessageId:", messageId);
+
+      // OPTIMISTIC UI: Add message using tx hash as stable identifier
+      const optimisticMessage: PrivateMessage = {
+        sender: account,
+        recipient: recipient,
+        content: content,
+        timestamp: BigInt(Math.floor(Date.now() / 1000)),
+        isRead: false,
+        isDeleted: false,
+        messageType: messageType,
+        deliveryStatus: "sending",
+        txHash: messageId,
+        messageId,
+      };
+
+      if (selectedChat === recipient) {
+        console.log("💬 [SEND_MSG] Adding optimistic message to UI");
+        setPrivateMessages((prev) => [...prev, optimisticMessage]);
+      }
 
       // Wait for confirmation in background, don't block UI
       tx.wait()
@@ -1508,13 +1530,15 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
           // Remove optimistic message on failure
           setPrivateMessages((prev) =>
             prev.filter(
-              (msg: any) => msg.timestamp !== optimisticMessage.timestamp
+              (msg: any) =>
+                msg.txHash !== messageId &&
+                (msg as any).messageId !== messageId
             )
           );
           setError("Message failed to send: " + (err.reason || err.message));
         });
 
-      return true;
+      return { success: true, txHash: messageId };
     } catch (err: any) {
       console.error("❌ [SEND_MSG] Error sending message:", err);
       console.error("❌ [SEND_MSG] Error details:", {
@@ -1523,13 +1547,6 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
         message: err.message,
         data: err.data,
       });
-
-      // Remove optimistic message on error
-      setPrivateMessages((prev: any[]) =>
-        prev.filter(
-          (msg: any) => msg.timestamp !== BigInt(Math.floor(Date.now() / 1000))
-        )
-      );
 
       // Parse custom contract errors
       if (err.message.includes("RateLimitExceeded")) {
@@ -1545,7 +1562,7 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
       } else {
         setError(err.message || "Failed to send message");
       }
-      return false;
+      return { success: false };
     }
   };
 
@@ -1564,6 +1581,53 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
       return false;
     }
   };
+
+  // Update message delivery status in local state (idempotent)
+  const updateMessageStatus = useCallback(
+    (identifier: string, status: "sending" | "sent" | "delivered" | "read") => {
+      console.log(
+        `📊 [STATUS] Updating message ${identifier.slice(
+          0,
+          10
+        )}... to ${status}`
+      );
+
+      setPrivateMessages((prev) => {
+        let updated = false;
+        const newMessages = prev.map((msg) => {
+          // Match by txHash or messageId
+          if (msg.txHash === identifier || msg.messageId === identifier) {
+            // Idempotency: Don't downgrade status
+            const statusOrder = { sending: 0, sent: 1, delivered: 2, read: 3 };
+            const currentStatus = msg.deliveryStatus || "sending";
+            const currentLevel = statusOrder[currentStatus] || 0;
+            const newLevel = statusOrder[status] || 0;
+
+            if (newLevel > currentLevel) {
+              updated = true;
+              console.log(`  ✅ [STATUS] ${currentStatus} → ${status}`);
+              return { ...msg, deliveryStatus: status };
+            } else {
+              console.log(
+                `  ⏭️ [STATUS] Skipping downgrade: ${currentStatus} → ${status}`
+              );
+              return msg;
+            }
+          }
+          return msg;
+        });
+
+        if (!updated) {
+          console.log(
+            `  ⚠️ [STATUS] Message not found: ${identifier.slice(0, 10)}`
+          );
+        }
+
+        return newMessages;
+      });
+    },
+    []
+  );
 
   const deleteMessage = async (
     chatId: string,
@@ -1762,6 +1826,7 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
         deleteMessage,
         addReaction,
         loadChatMessages,
+        updateMessageStatus,
         refreshData,
         // Toast notifications (V4)
         toasts,

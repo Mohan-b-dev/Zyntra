@@ -98,32 +98,32 @@ export default function Sidebar({
   };
 
   return (
-    <div className="w-full md:w-96 bg-gray-900 border-r border-gray-800 flex flex-col h-full overflow-hidden">
-      {/* Header - Fixed height, no overlap */}
-      <div className="p-4 border-b border-gray-800 flex-shrink-0">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center space-x-3">
+    <div className="w-full md:w-80 lg:w-96 bg-gray-900 border-r border-gray-800 flex flex-col h-full overflow-hidden">
+      {/* Header - Fixed height, no overlap, responsive */}
+      <div className="p-3 sm:p-4 border-b border-gray-800 flex-shrink-0">
+        <div className="flex items-center justify-between mb-3 sm:mb-4">
+          <div className="flex items-center space-x-2 sm:space-x-3 flex-1 min-w-0">
             {currentUser?.avatarUrl ? (
               <img
                 src={currentUser.avatarUrl}
                 alt="Profile"
-                className="w-10 h-10 rounded-full object-cover"
+                className="w-9 h-9 sm:w-10 sm:h-10 rounded-full object-cover flex-shrink-0"
               />
             ) : (
-              <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center">
-                <UserCircle className="w-6 h-6 text-white" />
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-blue-600 flex items-center justify-center flex-shrink-0">
+                <UserCircle className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
               </div>
             )}
-            <div className="flex-1">
-              <h2 className="font-semibold text-white">
+            <div className="flex-1 min-w-0">
+              <h2 className="font-semibold text-white text-sm sm:text-base truncate">
                 {currentUser?.username || "User"}
               </h2>
-              <p className="text-xs text-gray-400 truncate max-w-[150px]">
+              <p className="text-xs text-gray-400 truncate">
                 {currentUser?.status || "Hey there!"}
               </p>
             </div>
           </div>
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-1 sm:space-x-2 flex-shrink-0">
             {/* Smart Loading Indicator - only shows after 10s */}
             {showLoading && (
               <div className="animate-fade-in">
@@ -132,29 +132,29 @@ export default function Sidebar({
             )}
             <button
               onClick={onOpenContacts}
-              className="p-2 hover:bg-gray-800 rounded-full transition-colors"
+              className="p-1.5 sm:p-2 hover:bg-gray-800 rounded-full transition-colors touch-manipulation"
               title="New Chat"
             >
-              <Plus className="w-5 h-5 text-gray-400" />
+              <Plus className="w-4 h-4 sm:w-5 sm:h-5 text-gray-400" />
             </button>
             <button
               onClick={onOpenProfile}
-              className="p-2 hover:bg-gray-800 rounded-full transition-colors"
+              className="p-1.5 sm:p-2 hover:bg-gray-800 rounded-full transition-colors touch-manipulation"
               title="Profile"
             >
-              <Settings className="w-5 h-5 text-gray-400" />
+              <Settings className="w-4 h-4 sm:w-5 sm:h-5 text-gray-400" />
             </button>
             <button
               onClick={disconnectWallet}
-              className="p-2 hover:bg-gray-800 rounded-full transition-colors"
+              className="p-1.5 sm:p-2 hover:bg-gray-800 rounded-full transition-colors touch-manipulation"
               title="Disconnect"
             >
-              <LogOut className="w-5 h-5 text-gray-400" />
+              <LogOut className="w-4 h-4 sm:w-5 sm:h-5 text-gray-400" />
             </button>
           </div>
         </div>
 
-        {/* Search */}
+        {/* Search - Responsive */}
         <div className="relative">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-500" />
           <input
@@ -162,19 +162,19 @@ export default function Sidebar({
             placeholder="Search chats..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-gray-800 text-white pl-10 pr-4 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full bg-gray-800 text-white text-sm sm:text-base pl-9 sm:pl-10 pr-3 sm:pr-4 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 touch-manipulation"
           />
         </div>
       </div>
 
-      {/* Chats List */}
+      {/* Chats List - Responsive */}
       <div className="flex-1 overflow-y-auto">
         {filteredChats.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-32 text-gray-500">
-            <p>No chats yet</p>
+          <div className="flex flex-col items-center justify-center h-32 text-gray-500 px-4">
+            <p className="text-sm sm:text-base">No chats yet</p>
             <button
               onClick={onOpenContacts}
-              className="mt-2 text-blue-500 hover:text-blue-400 text-sm"
+              className="mt-2 text-blue-500 hover:text-blue-400 text-sm touch-manipulation"
             >
               Start a conversation
             </button>
@@ -193,29 +193,29 @@ export default function Sidebar({
                 // Notify parent (sets selectedChatName and mobile view)
                 onSelectChat(chat.address, chat.username);
               }}
-              className={`p-4 border-b border-gray-800 cursor-pointer transition-all hover:bg-gray-800 ${
+              className={`p-3 sm:p-4 border-b border-gray-800 cursor-pointer transition-all hover:bg-gray-800 touch-manipulation ${
                 selectedChat === chat.address
                   ? "bg-gray-800 border-l-4 border-l-blue-500"
                   : ""
               }`}
             >
-              <div className="flex items-center space-x-3">
+              <div className="flex items-center space-x-2 sm:space-x-3">
                 {chat.avatarUrl ? (
                   <img
                     src={chat.avatarUrl}
                     alt={chat.username}
-                    className="w-12 h-12 rounded-full object-cover"
+                    className="w-10 h-10 sm:w-12 sm:h-12 rounded-full object-cover flex-shrink-0"
                   />
                 ) : (
-                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center flex-shrink-0">
-                    <span className="text-white font-bold text-lg">
+                  <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center flex-shrink-0">
+                    <span className="text-white font-bold text-base sm:text-lg">
                       {chat.username.charAt(0).toUpperCase()}
                     </span>
                   </div>
                 )}
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-semibold text-white truncate">
+                  <div className="flex items-center justify-between mb-0.5">
+                    <h3 className="font-semibold text-white text-sm sm:text-base truncate">
                       {chat.username}
                     </h3>
                     <span className="text-xs text-gray-500 flex-shrink-0 ml-2">
@@ -225,7 +225,7 @@ export default function Sidebar({
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <p className="text-sm text-gray-400 truncate">
+                    <p className="text-xs sm:text-sm text-gray-400 truncate">
                       {chat.lastMessage || "No messages yet"}
                     </p>
                     {chat.unreadCount > 0 && (

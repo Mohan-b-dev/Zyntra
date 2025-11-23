@@ -35,9 +35,9 @@ export default function ChatWindow({
     if (!message.trim() || isSending) return;
 
     setIsSending(true);
-    const success = await sendPrivateMessage(recipientAddress, message.trim());
+    const result = await sendPrivateMessage(recipientAddress, message.trim());
 
-    if (success) {
+    if (result.success) {
       setMessage("");
     }
     setIsSending(false);

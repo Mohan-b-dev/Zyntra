@@ -167,9 +167,15 @@ export default function ChatWindowV2({
 
     setIsSending(true);
     try {
-      await sendPrivateMessage(selectedChat, message.trim(), "text");
-      setMessage("");
-      if (textareaRef.current) textareaRef.current.style.height = "auto";
+      const result = await sendPrivateMessage(
+        selectedChat,
+        message.trim(),
+        "text"
+      );
+      if (result.success) {
+        setMessage("");
+        if (textareaRef.current) textareaRef.current.style.height = "auto";
+      }
     } catch (err) {
       console.error("Failed to send message:", err);
     } finally {
@@ -220,15 +226,19 @@ export default function ChatWindowV2({
         clearInterval(uploadInterval);
         setUploadProgress(100);
         const base64 = ev.target?.result as string;
-        await sendPrivateMessage(
+        const result = await sendPrivateMessage(
           selectedChat,
           base64.substring(0, 100) + "...[IMAGE]",
           "image"
         );
-        setSelectedFile(null);
-        setFilePreview(null);
-        setUploadProgress(0);
-        setIsSending(false);
+        if (result.success) {
+          setSelectedFile(null);
+          setFilePreview(null);
+          setUploadProgress(0);
+          setIsSending(false);
+        } else {
+          setIsSending(false);
+        }
       };
       reader.readAsDataURL(selectedFile);
     } catch (err) {

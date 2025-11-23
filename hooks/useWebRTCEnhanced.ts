@@ -38,6 +38,7 @@ export const useWebRTCEnhanced = ({
   const callStartTime = useRef<number | null>(null);
   const durationInterval = useRef<NodeJS.Timeout | null>(null);
   const pendingICECandidates = useRef<RTCIceCandidate[]>([]);
+  const isAnswering = useRef<boolean>(false); // Idempotent guard for answer
 
   const iceServersRef = useRef<RTCConfiguration>({
     iceServers: [
@@ -240,6 +241,12 @@ export const useWebRTCEnhanced = ({
   );
 
   const answerCall = useCallback(async () => {
+    // Idempotent guard - prevent duplicate answer
+    if (isAnswering.current) {
+      console.warn("⚠️ Already answering call, ignoring duplicate");
+      return;
+    }
+
     if (!socket || !callInfo || callState !== "incoming") {
       console.warn("❌ Cannot answer call:", {
         socket: !!socket,
@@ -249,11 +256,13 @@ export const useWebRTCEnhanced = ({
       return;
     }
 
+    isAnswering.current = true; // Set guard
     console.log("✅ Answering", callInfo.type, "call from:", callInfo.peer);
 
     const stream = await getMediaStream(callInfo.type);
     if (!stream) {
       console.error("❌ Failed to get media stream");
+      isAnswering.current = false; // Reset on error
       return;
     }
 
@@ -262,6 +271,7 @@ export const useWebRTCEnhanced = ({
     const pc = peerConnection.current;
     if (!pc) {
       console.error("❌ No peer connection exists");
+      isAnswering.current = false; // Reset on error
       return;
     }
 
@@ -301,8 +311,10 @@ export const useWebRTCEnhanced = ({
       console.log("✅ Answer sent");
 
       setCallState("connecting");
+      // Keep guard set - we've successfully answered
     } catch (error) {
       console.error("❌ Failed to answer call:", error);
+      isAnswering.current = false; // Reset on error
       endCall();
     }
   }, [socket, callInfo, callState, getMediaStream]);
@@ -339,6 +351,7 @@ export const useWebRTCEnhanced = ({
     }
 
     remoteStream.current = null;
+    isAnswering.current = false; // Reset idempotent guard
 
     if (socket && callInfo && callState !== "idle" && callState !== "ended") {
       console.log("📤 Sending call-end signal to peer...");
@@ -459,7 +472,9 @@ export const useWebRTCEnhanced = ({
       answerer: string;
       answer: RTCSessionDescriptionInit;
     }) => {
-      console.log("✅ Call answered by:", data.answerer);
+      console.log("✅ [WebRTC] Call answered by:", data.answerer);
+      console.log("  - Current callState:", callState);
+      console.log("  - Peer connection exists:", !!peerConnection.current);
 
       const pc = peerConnection.current;
       if (!pc) {
@@ -467,8 +482,9 @@ export const useWebRTCEnhanced = ({
         return;
       }
 
-      if (callState !== "calling") {
-        console.warn("⚠️ Not in calling state, current state:", callState);
+      // Allow answer if we're in calling or connecting state
+      if (callState !== "calling" && callState !== "connecting") {
+        console.warn("⚠️ Not in calling/connecting state, current:", callState);
         return;
       }
 
@@ -478,7 +494,9 @@ export const useWebRTCEnhanced = ({
         console.log("✅ Remote description set:", pc.remoteDescription?.type);
 
         setCallState("connecting");
-        console.log("🔗 State changed to connecting");
+        console.log(
+          "🔗 State changed to connecting, waiting for connection..."
+        );
       } catch (error) {
         console.error("❌ Failed to set remote description:", error);
         endCall();

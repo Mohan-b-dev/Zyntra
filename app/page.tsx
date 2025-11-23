@@ -9,6 +9,7 @@ import ChatWindowV2Enhanced from "@/components/ChatWindowV2Enhanced";
 import ContactsList from "@/components/ContactsList";
 import ProfileModal from "@/components/ProfileModal";
 import PopupToast from "@/components/PopupToast";
+import GlobalCallManager from "@/components/GlobalCallManager";
 import { MessageCircle } from "lucide-react";
 
 export default function HomePage() {
@@ -76,14 +77,20 @@ export default function HomePage() {
   }
 
   return (
-    <div className="h-screen bg-gray-950 flex flex-col">
-      {/* Main Chat Interface - NO overflow-hidden to prevent clipping */}
-      <div className="flex-1 flex min-h-0">
-        {/* Sidebar - Hidden on mobile when chat is selected */}
+    <div className="h-screen bg-gray-950 flex flex-col overflow-hidden">
+      {/* Global Call Manager - Handles all incoming/outgoing calls */}
+      <GlobalCallManager
+        currentRoute={selectedChat ? "chat" : "home"}
+        currentChatAddress={selectedChat}
+      />
+
+      {/* Main Chat Interface - Responsive layout */}
+      <div className="flex-1 flex min-h-0 relative">
+        {/* Sidebar - Slides in/out on mobile, always visible on desktop */}
         <div
           className={`${
-            isMobileView && selectedChat ? "hidden md:flex" : "flex"
-          } md:flex`}
+            isMobileView && selectedChat ? "hidden" : "flex"
+          } md:flex w-full md:w-auto flex-shrink-0`}
         >
           <SidebarV2
             onSelectChat={handleSelectChat}
@@ -95,10 +102,15 @@ export default function HomePage() {
 
         {/* Chat Window or Welcome Screen */}
         {selectedChat ? (
-          <div className={`${isMobileView ? "flex" : "hidden md:flex"} flex-1`}>
+          <div
+            className={`${
+              isMobileView ? "flex" : "hidden md:flex"
+            } flex-1 w-full md:w-auto absolute md:relative inset-0 md:inset-auto z-10 md:z-auto`}
+          >
             <ChatWindowV2Enhanced
               selectedChat={selectedChat}
               selectedChatName={selectedChatName}
+              onBack={handleBack}
             />
           </div>
         ) : (

@@ -20,7 +20,8 @@ const io = new Server(server, {
 
 // ========== STATE MANAGEMENT ==========
 
-// Online users: { walletAddress: { socketId, isOnline, lastSeen } }
+// Online users: { walletAddress: { socketId, isOnline, lastSeen, lastHeartbeat, presenceState } }
+// presenceState: 'active' | 'away' | 'offline'
 const onlineUsers = new Map();
 
 // Active calls: { walletAddress: { inCall: boolean, with: walletAddress } }
@@ -37,6 +38,35 @@ const messageStatus = new Map();
 
 // Group members cache: { groupId: [memberAddresses] }
 const groupMembers = new Map();
+
+// Heartbeat check interval (every 5 seconds for 10s TTL)
+const HEARTBEAT_INTERVAL = 5000; // Check every 5s
+const HEARTBEAT_TIMEOUT = 10000; // Mark offline after 10s
+
+setInterval(() => {
+  const now = Date.now();
+  onlineUsers.forEach((user, address) => {
+    // If no heartbeat for HEARTBEAT_TIMEOUT, mark as offline
+    if (
+      user.isOnline &&
+      user.lastHeartbeat &&
+      now - user.lastHeartbeat > HEARTBEAT_TIMEOUT
+    ) {
+      console.log("💔 User timeout (no heartbeat for 10s):", address);
+      user.isOnline = false;
+      user.presenceState = "offline";
+      user.lastSeen = now;
+
+      // Notify all clients
+      io.emit("user-status-changed", {
+        address: address,
+        isOnline: false,
+        presenceState: "offline",
+        lastSeen: now,
+      });
+    }
+  });
+}, HEARTBEAT_INTERVAL); // Check every 5 seconds
 
 // ========== HELPER FUNCTIONS ==========
 
@@ -64,20 +94,46 @@ io.on("connection", (socket) => {
   // ========== USER REGISTRATION & ONLINE STATUS ==========
 
   socket.on("register", (walletAddress) => {
+    if (!walletAddress) {
+      console.warn("⚠️ Register called with empty wallet address");
+      return;
+    }
+
     console.log("📝 User registered:", walletAddress);
     const addr = walletAddress.toLowerCase();
 
     onlineUsers.set(addr, {
       socketId: socket.id,
       isOnline: true,
+      presenceState: "active", // Start as active
       lastSeen: Date.now(),
+      lastHeartbeat: Date.now(),
     });
 
     socket.walletAddress = addr;
 
-    // Notify all users that this user is online
+    // Send current online users to the newly connected client
+    const onlineUsersList = [];
+    onlineUsers.forEach((userData, userAddr) => {
+      if (userAddr !== addr && userData.isOnline) {
+        onlineUsersList.push({
+          address: userAddr,
+          isOnline: userData.isOnline,
+          presenceState: userData.presenceState || "active",
+          lastSeen: userData.lastSeen,
+        });
+      }
+    });
+
+    // Send all online users to the new connection
+    onlineUsersList.forEach((user) => {
+      socket.emit("user-status-changed", user);
+    });
+
+    // Notify all OTHER users that this user is online
     socket.broadcast.emit("user-online", {
-      address: walletAddress,
+      address: addr,
+      presenceState: "active",
       timestamp: Date.now(),
     });
 
@@ -90,21 +146,90 @@ io.on("connection", (socket) => {
       const user = onlineUsers.get(socket.walletAddress);
       if (user) {
         user.isOnline = isOnline;
+        user.presenceState = isOnline ? "active" : "offline";
         user.lastSeen = Date.now();
+        user.lastHeartbeat = Date.now();
 
         socket.broadcast.emit("user-status-changed", {
           address: socket.walletAddress,
           isOnline,
+          presenceState: user.presenceState,
           lastSeen: user.lastSeen,
         });
       }
     }
   });
 
-  // ========== PRIVATE MESSAGING ==========
+  // Set presence state (active/away)
+  socket.on("set-presence-state", (data) => {
+    const { presenceState } = data; // 'active' or 'away'
+    if (
+      socket.walletAddress &&
+      (presenceState === "active" || presenceState === "away")
+    ) {
+      const user = onlineUsers.get(socket.walletAddress);
+      if (user) {
+        console.log(
+          `👤 User ${socket.walletAddress} presence: ${user.presenceState} → ${presenceState}`
+        );
+        user.presenceState = presenceState;
+        user.lastHeartbeat = Date.now();
 
-  socket.on("new-message", (data) => {
+        // Broadcast presence change
+        socket.broadcast.emit("user-status-changed", {
+          address: socket.walletAddress,
+          isOnline: user.isOnline,
+          presenceState: presenceState,
+          lastSeen: user.lastSeen,
+        });
+      }
+    }
+  });
+
+  // Heartbeat to keep connection alive and detect disconnects
+  socket.on("heartbeat", () => {
+    if (socket.walletAddress) {
+      const user = onlineUsers.get(socket.walletAddress);
+      if (user) {
+        user.lastHeartbeat = Date.now();
+        user.isOnline = true;
+      }
+    }
+  });
+
+  // Get user status
+  socket.on("get-user-status", (data) => {
+    const { address } = data;
+    if (!address) {
+      console.warn("⚠️ get-user-status called without address");
+      return;
+    }
+
+    const userAddr = address.toLowerCase();
+    const user = onlineUsers.get(userAddr);
+
+    console.log(
+      "🔍 Get user status:",
+      userAddr,
+      user ? (user.isOnline ? "online" : "offline") : "not found",
+      user?.presenceState || "unknown"
+    );
+
+    // Always emit response, even if user not found (means offline)
+    socket.emit("user-status-changed", {
+      address: userAddr,
+      isOnline: user ? user.isOnline : false,
+      presenceState: user ? user.presenceState || "offline" : "offline",
+      lastSeen: user ? user.lastSeen : Date.now(),
+    });
+  });
+
+  // ========== PRIVATE MESSAGING (STRICT PROTOCOL) ==========
+
+  // 1. Client sends message
+  socket.on("client:message-send", (data) => {
     const {
+      messageId,
       recipient,
       sender,
       content,
@@ -113,74 +238,167 @@ io.on("connection", (socket) => {
       messageType = "text",
     } = data;
     const recipientAddr = recipient.toLowerCase();
+    const senderAddr = sender.toLowerCase();
     const recipientUser = onlineUsers.get(recipientAddr);
+    const serverTimestamp = Date.now();
 
-    console.log("📨 New message:", { sender, recipient, type: messageType });
-
-    // Initialize message status tracking
-    messageStatus.set(txHash, {
-      delivered: [],
-      read: [],
-      sender: sender.toLowerCase(),
-      recipient: recipientAddr,
-      timestamp: Date.now(),
+    console.log("📨 [PROTOCOL] client:message-send:", {
+      messageId: messageId?.slice(0, 10),
+      sender: senderAddr.slice(0, 10),
+      recipient: recipientAddr.slice(0, 10),
+      type: messageType,
     });
 
+    // Initialize message status tracking (idempotent)
+    if (!messageStatus.has(messageId)) {
+      messageStatus.set(messageId, {
+        delivered: [],
+        read: [],
+        sender: senderAddr,
+        recipient: recipientAddr,
+        timestamp: serverTimestamp,
+        txHash: txHash,
+      });
+    }
+
+    // 2. Immediately emit sent-ack to sender (SENT state)
+    socket.emit("server:message-sent-ack", {
+      messageId,
+      txHash,
+      serverTimestamp,
+    });
+    console.log("  ✅ [PROTOCOL] server:message-sent-ack → sender");
+
+    // 3. Emit incoming message to recipient
     if (recipientUser && recipientUser.isOnline) {
-      // User is online - deliver immediately
-      io.to(recipientUser.socketId).emit("receive-message", {
+      io.to(recipientUser.socketId).emit("server:message-incoming", {
+        messageId,
         sender,
         recipient,
         content,
         timestamp,
         txHash,
         messageType,
-        status: "delivered",
+        serverTimestamp,
       });
-
-      // Mark as delivered
-      const status = messageStatus.get(txHash);
-      if (status) {
-        status.delivered.push(recipientAddr);
-      }
-
-      // Notify sender of delivery
-      socket.emit("message-delivered", {
-        txHash,
-        recipient: recipientAddr,
-        timestamp: Date.now(),
-      });
-
-      console.log("✅ Message delivered to:", recipient);
+      console.log("  📬 [PROTOCOL] server:message-incoming → recipient");
     } else {
-      // User offline - will be delivered when they come online
-      console.log("📵 Recipient offline, message queued");
+      console.log("  📵 [PROTOCOL] Recipient offline, message queued");
     }
   });
 
-  socket.on("message-read", (data) => {
-    const { txHash, chatId, messageIndex } = data;
+  // Backward compatibility - map old event to new
+  socket.on("new-message", (data) => {
+    socket.emit("client:message-send", {
+      ...data,
+      messageId: data.txHash || `msg-${Date.now()}-${Math.random()}`,
+    });
+  });
 
-    const status = messageStatus.get(txHash);
+  // 4. Recipient acknowledges receipt (DELIVERED state)
+  socket.on("client:message-received", (data) => {
+    const { messageId, txHash } = data;
+    const lookupId = messageId || txHash;
+    const deliveredAt = Date.now();
+
+    console.log("📬 [PROTOCOL] client:message-received:", {
+      messageId: lookupId?.slice(0, 10),
+      from: socket.walletAddress?.slice(0, 10),
+    });
+
+    const status = messageStatus.get(lookupId);
     if (status && socket.walletAddress) {
-      if (!status.read.includes(socket.walletAddress)) {
-        status.read.push(socket.walletAddress);
+      const recipientAddr = socket.walletAddress.toLowerCase();
+
+      // Mark as delivered (idempotent)
+      if (!status.delivered.includes(recipientAddr)) {
+        status.delivered.push(recipientAddr);
+        console.log("  📝 [PROTOCOL] Persisted delivered status");
       }
 
-      // Notify sender that message was read
+      // 5. Notify sender that message was delivered
       const senderUser = onlineUsers.get(status.sender);
       if (senderUser && senderUser.socketId) {
-        io.to(senderUser.socketId).emit("message-read-receipt", {
-          txHash,
-          reader: socket.walletAddress,
-          chatId,
-          messageIndex,
-          timestamp: Date.now(),
+        io.to(senderUser.socketId).emit("server:message-delivered", {
+          messageId: lookupId,
+          txHash: status.txHash,
+          deliveredAt,
+          deliveredBy: recipientAddr,
         });
+        console.log("  ✅ [PROTOCOL] server:message-delivered → sender");
       }
 
-      console.log("👁️ Message read by:", socket.walletAddress);
+      // Also notify recipient for their UI (single gray tick)
+      socket.emit("server:message-delivered", {
+        messageId: lookupId,
+        txHash: status.txHash,
+        deliveredAt,
+        deliveredBy: recipientAddr,
+      });
+      console.log(
+        "  ✅ [PROTOCOL] server:message-delivered → recipient (for UI)"
+      );
     }
+  });
+
+  // Backward compatibility
+  socket.on("message-delivered-ack", (data) => {
+    socket.emit("client:message-received", {
+      messageId: data.txHash,
+      txHash: data.txHash,
+    });
+  });
+
+  // 6-7. Recipient marks message as read (READ state)
+  socket.on("client:message-read", (data) => {
+    const { messageId, txHash } = data;
+    const lookupId = messageId || txHash;
+    const readAt = Date.now();
+
+    console.log("👁️ [PROTOCOL] client:message-read:", {
+      messageId: lookupId?.slice(0, 10),
+      from: socket.walletAddress?.slice(0, 10),
+    });
+
+    const status = messageStatus.get(lookupId);
+    if (status && socket.walletAddress) {
+      const readerAddr = socket.walletAddress.toLowerCase();
+
+      // Mark as read (idempotent)
+      if (!status.read.includes(readerAddr)) {
+        status.read.push(readerAddr);
+        console.log("  📝 [PROTOCOL] Persisted read status");
+      }
+
+      // 8. Notify sender that message was read
+      const senderUser = onlineUsers.get(status.sender);
+      if (senderUser && senderUser.socketId) {
+        io.to(senderUser.socketId).emit("server:message-read", {
+          messageId: lookupId,
+          txHash: status.txHash,
+          readAt,
+          readBy: readerAddr,
+        });
+        console.log("  ✅ [PROTOCOL] server:message-read → sender");
+      }
+
+      // Also notify recipient for their UI (double blue tick)
+      socket.emit("server:message-read", {
+        messageId: lookupId,
+        txHash: status.txHash,
+        readAt,
+        readBy: readerAddr,
+      });
+      console.log("  ✅ [PROTOCOL] server:message-read → recipient (for UI)");
+    }
+  });
+
+  // Backward compatibility
+  socket.on("message-read", (data) => {
+    socket.emit("client:message-read", {
+      messageId: data.txHash,
+      txHash: data.txHash,
+    });
   });
 
   // ========== TYPING INDICATORS ==========
@@ -555,11 +773,13 @@ io.on("connection", (socket) => {
       const user = onlineUsers.get(socket.walletAddress);
       if (user) {
         user.isOnline = false;
+        user.presenceState = "offline";
         user.lastSeen = Date.now();
 
         // Notify others that user is offline
         socket.broadcast.emit("user-offline", {
           address: socket.walletAddress,
+          presenceState: "offline",
           lastSeen: user.lastSeen,
         });
       }
