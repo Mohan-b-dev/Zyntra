@@ -91,12 +91,12 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({
       setIsConnected(false);
     });
 
-    // Send heartbeat every 5 seconds (server checks every 5s with 10s timeout)
+    // Send heartbeat every 10 seconds (server checks every 10s with 30s timeout)
     const heartbeatInterval = setInterval(() => {
       if (socketInstance.connected) {
         socketInstance.emit("heartbeat");
       }
-    }, 5000);
+    }, 10000); // Send heartbeat every 10 seconds
 
     // Handle window focus/blur for away state
     const handleFocus = () => {
@@ -541,10 +541,7 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({
 
         // New strict protocol
         socket.emit("client:message-read", payload);
-        console.log(
-          "📤 [PROTOCOL] client:message-read:",
-          txHash?.slice(0, 10)
-        );
+        console.log("📤 [PROTOCOL] client:message-read:", txHash?.slice(0, 10));
 
         // Legacy fallback for older servers
         socket.emit("message-read", payload);

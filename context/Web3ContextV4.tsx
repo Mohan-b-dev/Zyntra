@@ -1253,10 +1253,16 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
       // Sort by most recent first
       chatsWithMessages.sort((a, b) => b.lastMessageTime - a.lastMessageTime);
 
-      console.log(
-        `✅ [LOAD_CHATS] Loaded ${chatsWithMessages.length} chats with messages`
+      // Filter out deleted chats from localStorage
+      const deletedChats = JSON.parse(localStorage.getItem("deletedChats") || "[]");
+      const filteredChats = chatsWithMessages.filter(
+        (chat) => !deletedChats.includes(chat.address.toLowerCase())
       );
-      setUserChats(chatsWithMessages);
+
+      console.log(
+        `✅ [LOAD_CHATS] Loaded ${filteredChats.length} chats (filtered ${chatsWithMessages.length - filteredChats.length} deleted)`
+      );
+      setUserChats(filteredChats);
     } catch (err: any) {
       console.error("❌ [LOAD_CHATS] Error loading chats:", err);
       console.error("❌ [LOAD_CHATS] Error details:", {
@@ -1531,8 +1537,7 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
           setPrivateMessages((prev) =>
             prev.filter(
               (msg: any) =>
-                msg.txHash !== messageId &&
-                (msg as any).messageId !== messageId
+                msg.txHash !== messageId && (msg as any).messageId !== messageId
             )
           );
           setError("Message failed to send: " + (err.reason || err.message));

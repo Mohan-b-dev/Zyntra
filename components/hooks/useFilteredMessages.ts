@@ -74,9 +74,31 @@ export default function useFilteredMessages(
       return match;
     });
 
+    // Apply local filters: cleared chats and blocked users
+    const clearedChats = JSON.parse(localStorage.getItem("clearedChats") || "{}");
+    const blockedUsers = JSON.parse(localStorage.getItem("blockedUsers") || "[]");
+    
+    const clearedTimestamp = clearedChats[sel];
+    const isBlocked = blockedUsers.includes(sel);
+
+    let finalFiltered = filtered;
+
+    // Filter out messages before clear timestamp
+    if (clearedTimestamp) {
+      finalFiltered = finalFiltered.filter((msg) => {
+        const msgTime = Number(msg.timestamp);
+        return msgTime > clearedTimestamp / 1000; // Convert ms to seconds
+      });
+    }
+
+    // Don't show messages from blocked users
+    if (isBlocked) {
+      finalFiltered = [];
+    }
+
     console.log(
-      `✅ [useFilteredMessages] Filtered ${filtered.length} messages out of ${messages.length} total`
+      `✅ [useFilteredMessages] Filtered ${finalFiltered.length} messages (after local filters) out of ${messages.length} total`
     );
-    return filtered;
+    return finalFiltered;
   }, [messages, selectedChat, connectedAccount]);
 }

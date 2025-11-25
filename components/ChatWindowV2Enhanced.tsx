@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useWeb3 } from "@/context/Web3ContextV4";
 import { useWebSocket } from "@/context/WebSocketContext";
-import { useWebRTCEnhanced } from "@/hooks/useWebRTCEnhanced";
+import { useCallManager } from "@/components/GlobalCallManager";
 import ChatMenuDropdown from "@/components/ChatMenuDropdown";
 import MessageStatusIcon from "@/components/MessageStatusIcon";
 import ChatInfoSidebar from "@/components/ChatInfoSidebar";
@@ -67,6 +67,9 @@ export default function ChatWindowV2Enhanced({
   // WebSocket for real-time features
   const webSocket = useWebSocket();
 
+  // Use shared call manager for initiating calls
+  const { startCall } = useCallManager();
+
   // Check presence when chat changes - only once, then rely on real-time events
   useEffect(() => {
     if (selectedChat && webSocket?.checkUserPresence && webSocket.isConnected) {
@@ -122,12 +125,6 @@ export default function ChatWindowV2Enhanced({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedChat, webSocket?.userPresence, webSocket?.isConnected]);
-
-  // WebRTC for initiating calls from chat window
-  const { startCall } = useWebRTCEnhanced({
-    socket: webSocket?.socket || null,
-    userAddress: account,
-  });
 
   // INSTANT message loading - no delays, no loading states blocking UI
   useEffect(() => {
@@ -311,9 +308,13 @@ export default function ChatWindowV2Enhanced({
       alert("File size must be less than 10MB");
       return;
     }
-    const validTypes = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+    // Support both images and documents
+    const imageTypes = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+    const docTypes = ["application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "text/plain"];
+    const validTypes = [...imageTypes, ...docTypes];
+    
     if (!validTypes.includes(file.type)) {
-      alert("Only images (JPEG, PNG, GIF, WEBP) are supported");
+      alert("Supported formats: Images (JPEG, PNG, GIF, WEBP) and Documents (PDF, DOC, DOCX, TXT)");
       return;
     }
     setSelectedFile(file);
@@ -335,14 +336,35 @@ export default function ChatWindowV2Enhanced({
         clearInterval(uploadInterval);
         setUploadProgress(100);
         const base64 = ev.target?.result as string;
+        
+        // Determine if it's an image or document
+        const isImage = selectedFile.type.startsWith("image/");
+        const messageType = isImage ? "image" : "file";
+        const displayText = isImage ? "[IMAGE]" : `[FILE: ${selectedFile.name}]`;
+        
+        // Store file metadata with message content (full data, no truncation)
+        const fileData = JSON.stringify({
+          name: selectedFile.name,
+          type: selectedFile.type,
+          size: selectedFile.size,
+          data: base64
+        });
+        
+        console.log(`📎 Sending ${messageType}:`, selectedFile.name, `(${(selectedFile.size / 1024).toFixed(2)} KB)`);
+        
         const result = await sendPrivateMessage(
           selectedChat,
-          base64.substring(0, 100) + "...[IMAGE]",
-          "image"
+          fileData, // Send full data, not truncated
+          messageType
         );
+        
         if (result.success && result.txHash && webSocket?.sendMessage) {
-          webSocket.sendMessage(selectedChat, "[image]", result.txHash);
+          webSocket.sendMessage(selectedChat, displayText, result.txHash);
+          console.log("✅ File sent successfully:", result.txHash);
+        } else {
+          console.error("❌ File send failed:", result);
         }
+        
         setSelectedFile(null);
         setFilePreview(null);
         setUploadProgress(0);
@@ -388,34 +410,57 @@ export default function ChatWindowV2Enhanced({
 
   const handleClearChat = () => {
     if (!selectedChat) return;
-    // TODO: Implement clear messages functionality
-    console.log("Clear chat:", selectedChat);
+    // Store cleared chats in localStorage (client-side only)
+    const clearedChats = JSON.parse(localStorage.getItem("clearedChats") || "{}");
+    clearedChats[selectedChat.toLowerCase()] = Date.now();
+    localStorage.setItem("clearedChats", JSON.stringify(clearedChats));
+    // Reload messages to apply filter
+    loadChatMessages(selectedChat);
+    console.log("✅ Chat cleared locally:", selectedChat.slice(0, 10));
   };
 
   const handleDeleteChat = () => {
     if (!selectedChat) return;
-    // TODO: Implement delete chat functionality
-    console.log("Delete chat:", selectedChat);
+    // Store deleted chats in localStorage (client-side only, not on blockchain)
+    const deletedChats = JSON.parse(localStorage.getItem("deletedChats") || "[]");
+    if (!deletedChats.includes(selectedChat.toLowerCase())) {
+      deletedChats.push(selectedChat.toLowerCase());
+      localStorage.setItem("deletedChats", JSON.stringify(deletedChats));
+    }
+    console.log("✅ Chat deleted locally:", selectedChat.slice(0, 10));
+    // Navigate away from deleted chat
+    if (onBack) onBack();
   };
 
   const handleBlockUser = () => {
-    if (!selectedChat || !webSocket?.socket) return;
-    webSocket.socket.emit("block-user", { blockedAddress: selectedChat });
-    setIsBlocked(true);
+    if (!selectedChat) return;
+    // Store blocked users in localStorage (client-side only)
+    const blockedUsers = JSON.parse(localStorage.getItem("blockedUsers") || "[]");
+    if (!blockedUsers.includes(selectedChat.toLowerCase())) {
+      blockedUsers.push(selectedChat.toLowerCase());
+      localStorage.setItem("blockedUsers", JSON.stringify(blockedUsers));
+      setIsBlocked(true);
+      console.log("🚫 User blocked locally:", selectedChat.slice(0, 10));
+    }
   };
 
   const handleUnblockUser = () => {
-    if (!selectedChat || !webSocket?.socket) return;
-    webSocket.socket.emit("unblock-user", { unblockedAddress: selectedChat });
+    if (!selectedChat) return;
+    // Remove from blocked users in localStorage
+    const blockedUsers = JSON.parse(localStorage.getItem("blockedUsers") || "[]");
+    const filtered = blockedUsers.filter((addr: string) => addr !== selectedChat.toLowerCase());
+    localStorage.setItem("blockedUsers", JSON.stringify(filtered));
     setIsBlocked(false);
+    console.log("✅ User unblocked locally:", selectedChat.slice(0, 10));
   };
 
-  // Load muted/blocked state
+  // Load muted/blocked state from localStorage
   useEffect(() => {
     if (!selectedChat) return;
     const mutedChats = JSON.parse(localStorage.getItem("mutedChats") || "[]");
-    setIsMuted(mutedChats.includes(selectedChat));
-    // TODO: Load blocked state from server
+    const blockedUsers = JSON.parse(localStorage.getItem("blockedUsers") || "[]");
+    setIsMuted(mutedChats.includes(selectedChat.toLowerCase()));
+    setIsBlocked(blockedUsers.includes(selectedChat.toLowerCase()));
   }, [selectedChat]);
 
   if (!selectedChat) {
@@ -791,7 +836,7 @@ export default function ChatWindowV2Enhanced({
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*"
+            accept="image/*,application/pdf,.doc,.docx,.txt"
             onChange={handleFileSelect}
             className="hidden"
           />
@@ -840,6 +885,7 @@ export default function ChatWindowV2Enhanced({
         onUnblockUser={handleUnblockUser}
         isMuted={isMuted}
         isBlocked={isBlocked}
+        messages={filteredMessages}
       />
     </div>
   );

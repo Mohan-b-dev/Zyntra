@@ -77,80 +77,79 @@ export default function HomePage() {
   }
 
   return (
-    <div className="h-screen bg-gray-950 flex flex-col overflow-hidden">
-      {/* Global Call Manager - Handles all incoming/outgoing calls */}
-      <GlobalCallManager
-        currentRoute={selectedChat ? "chat" : "home"}
-        currentChatAddress={selectedChat}
-      />
-
-      {/* Main Chat Interface - Responsive layout */}
-      <div className="flex-1 flex min-h-0 relative">
-        {/* Sidebar - Slides in/out on mobile, always visible on desktop */}
-        <div
-          className={`${
-            isMobileView && selectedChat ? "hidden" : "flex"
-          } md:flex w-full md:w-auto flex-shrink-0`}
-        >
-          <SidebarV2
-            onSelectChat={handleSelectChat}
-            selectedChat={selectedChat}
-            onOpenContacts={() => setShowContacts(true)}
-            onOpenProfile={() => setShowProfile(true)}
-          />
-        </div>
-
-        {/* Chat Window or Welcome Screen */}
-        {selectedChat ? (
+    <GlobalCallManager
+      currentRoute={selectedChat ? "chat" : "home"}
+      currentChatAddress={selectedChat}
+    >
+      <div className="h-screen bg-gray-950 flex flex-col overflow-hidden">
+        {/* Main Chat Interface - Responsive layout */}
+        <div className="flex-1 flex min-h-0 relative">
+          {/* Sidebar - Slides in/out on mobile, always visible on desktop */}
           <div
             className={`${
-              isMobileView ? "flex" : "hidden md:flex"
-            } flex-1 w-full md:w-auto absolute md:relative inset-0 md:inset-auto z-10 md:z-auto`}
+              isMobileView && selectedChat ? "hidden" : "flex"
+            } md:flex w-full md:w-auto flex-shrink-0`}
           >
-            <ChatWindowV2Enhanced
+            <SidebarV2
+              onSelectChat={handleSelectChat}
               selectedChat={selectedChat}
-              selectedChatName={selectedChatName}
-              onBack={handleBack}
+              onOpenContacts={() => setShowContacts(true)}
+              onOpenProfile={() => setShowProfile(true)}
             />
           </div>
-        ) : (
-          <div className="hidden md:flex flex-1 items-center justify-center bg-gray-900">
-            <div className="text-center">
-              <div className="mb-6 flex justify-center">
-                <div className="w-32 h-32 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
-                  <MessageCircle className="w-16 h-16 text-white" />
-                </div>
-              </div>
-              <h2 className="text-2xl font-bold text-white mb-2">
-                ChatDApp v3.0
-              </h2>
-              <p className="text-gray-400 mb-6">
-                Select a chat to start messaging
-              </p>
-              <button
-                onClick={() => setShowContacts(true)}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg transition-colors"
-              >
-                Start New Chat
-              </button>
+
+          {/* Chat Window or Welcome Screen */}
+          {selectedChat ? (
+            <div
+              className={`${
+                isMobileView ? "flex" : "hidden md:flex"
+              } flex-1 w-full md:w-auto absolute md:relative inset-0 md:inset-auto z-10 md:z-auto`}
+            >
+              <ChatWindowV2Enhanced
+                selectedChat={selectedChat}
+                selectedChatName={selectedChatName}
+                onBack={handleBack}
+              />
             </div>
-          </div>
-        )}
+          ) : (
+            <div className="hidden md:flex flex-1 items-center justify-center bg-gray-900">
+              <div className="text-center">
+                <div className="mb-6 flex justify-center">
+                  <div className="w-32 h-32 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
+                    <MessageCircle className="w-16 h-16 text-white" />
+                  </div>
+                </div>
+                <h2 className="text-2xl font-bold text-white mb-2">
+                  ChatDApp v3.0
+                </h2>
+                <p className="text-gray-400 mb-6">
+                  Select a chat to start messaging
+                </p>
+                <button
+                  onClick={() => setShowContacts(true)}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg transition-colors"
+                >
+                  Start New Chat
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Modals */}
+        <ContactsList
+          isOpen={showContacts}
+          onClose={() => setShowContacts(false)}
+          onSelectContact={handleSelectChat}
+        />
+        <ProfileModal
+          isOpen={showProfile}
+          onClose={() => setShowProfile(false)}
+        />
+
+        {/* Toast Notifications */}
+        <PopupToast toasts={toasts} onClose={removeToast} />
       </div>
-
-      {/* Modals */}
-      <ContactsList
-        isOpen={showContacts}
-        onClose={() => setShowContacts(false)}
-        onSelectContact={handleSelectChat}
-      />
-      <ProfileModal
-        isOpen={showProfile}
-        onClose={() => setShowProfile(false)}
-      />
-
-      {/* Toast Notifications */}
-      <PopupToast toasts={toasts} onClose={removeToast} />
-    </div>
+    </GlobalCallManager>
   );
 }

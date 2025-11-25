@@ -39,9 +39,9 @@ const messageStatus = new Map();
 // Group members cache: { groupId: [memberAddresses] }
 const groupMembers = new Map();
 
-// Heartbeat check interval (every 5 seconds for 10s TTL)
-const HEARTBEAT_INTERVAL = 5000; // Check every 5s
-const HEARTBEAT_TIMEOUT = 10000; // Mark offline after 10s
+// Heartbeat check interval (check every 10 seconds with 30s timeout for better stability)
+const HEARTBEAT_INTERVAL = 10000; // Check every 10s
+const HEARTBEAT_TIMEOUT = 30000; // Mark offline after 30s (more forgiving)
 
 setInterval(() => {
   const now = Date.now();
@@ -52,7 +52,7 @@ setInterval(() => {
       user.lastHeartbeat &&
       now - user.lastHeartbeat > HEARTBEAT_TIMEOUT
     ) {
-      console.log("💔 User timeout (no heartbeat for 10s):", address);
+      console.log(`💔 User timeout (no heartbeat for ${HEARTBEAT_TIMEOUT/1000}s):`, address);
       user.isOnline = false;
       user.presenceState = "offline";
       user.lastSeen = now;
@@ -66,7 +66,7 @@ setInterval(() => {
       });
     }
   });
-}, HEARTBEAT_INTERVAL); // Check every 5 seconds
+}, HEARTBEAT_INTERVAL); // Check every 10 seconds
 
 // ========== HELPER FUNCTIONS ==========
 
@@ -94,13 +94,19 @@ io.on("connection", (socket) => {
   // ========== USER REGISTRATION & ONLINE STATUS ==========
 
   socket.on("register", (walletAddress) => {
-    if (!walletAddress) {
-      console.warn("⚠️ Register called with empty wallet address");
+    if (!walletAddress || typeof walletAddress !== 'string') {
+      console.warn("⚠️ Register called with invalid wallet address:", walletAddress);
       return;
     }
 
-    console.log("📝 User registered:", walletAddress);
     const addr = walletAddress.toLowerCase();
+    console.log("📝 User registered:", walletAddress);
+
+    // Check if user already registered with different socket
+    const existingUser = onlineUsers.get(addr);
+    if (existingUser && existingUser.socketId !== socket.id) {
+      console.log("⚠️ User re-registering from new socket, updating...");
+    }
 
     onlineUsers.set(addr, {
       socketId: socket.id,
@@ -193,6 +199,16 @@ io.on("connection", (socket) => {
       if (user) {
         user.lastHeartbeat = Date.now();
         user.isOnline = true;
+        // If user was offline, bring them back online
+        if (user.presenceState === "offline") {
+          user.presenceState = "active";
+          socket.broadcast.emit("user-status-changed", {
+            address: socket.walletAddress,
+            isOnline: true,
+            presenceState: "active",
+            lastSeen: user.lastSeen,
+          });
+        }
       }
     }
   });
@@ -677,6 +693,10 @@ io.on("connection", (socket) => {
 
   socket.on("ice-candidate", (data) => {
     const { recipient, candidate } = data;
+    if (!recipient) {
+      console.warn("⚠️ ICE candidate received without recipient");
+      return;
+    }
     const recipientAddr = recipient.toLowerCase();
     const recipientUser = onlineUsers.get(recipientAddr);
 
@@ -690,6 +710,12 @@ io.on("connection", (socket) => {
 
   socket.on("call-end", (data) => {
     const { recipient } = data;
+    if (!recipient) {
+      console.warn("⚠️ Call-end received without recipient");
+      // Clear caller's active call status at minimum
+      activeCalls.delete(socket.walletAddress);
+      return;
+    }
     const recipientAddr = recipient.toLowerCase();
     const recipientUser = onlineUsers.get(recipientAddr);
 
@@ -739,59 +765,63 @@ io.on("connection", (socket) => {
     console.log("🔌 Client disconnected:", socket.id);
 
     if (socket.walletAddress) {
-      // If user was in a call, notify the peer
-      const activeCall = activeCalls.get(socket.walletAddress);
-      if (activeCall && activeCall.with) {
-        const peerUser = onlineUsers.get(activeCall.with);
-        if (peerUser && peerUser.socketId) {
-          io.to(peerUser.socketId).emit("call-ended", {
-            caller: socket.walletAddress,
-          });
+      try {
+        // If user was in a call, notify the peer
+        const activeCall = activeCalls.get(socket.walletAddress);
+        if (activeCall && activeCall.with) {
+          const peerUser = onlineUsers.get(activeCall.with);
+          if (peerUser && peerUser.socketId) {
+            io.to(peerUser.socketId).emit("call-ended", {
+              caller: socket.walletAddress,
+            });
+          }
+          activeCalls.delete(activeCall.with);
         }
-        activeCalls.delete(activeCall.with);
-      }
-      activeCalls.delete(socket.walletAddress);
+        activeCalls.delete(socket.walletAddress);
 
-      // Clear typing status
-      typingStatus.forEach((users, chatId) => {
-        users.delete(socket.walletAddress);
-      });
-
-      groupTypingStatus.forEach((users, groupId) => {
-        if (users.has(socket.walletAddress)) {
-          users.delete(socket.walletAddress);
-          // Notify group that user stopped typing
-          io.to(`group:${groupId}`).emit("group-user-typing", {
-            groupId,
-            user: socket.walletAddress,
-            isTyping: false,
-          });
-        }
-      });
-
-      // Update online status
-      const user = onlineUsers.get(socket.walletAddress);
-      if (user) {
-        user.isOnline = false;
-        user.presenceState = "offline";
-        user.lastSeen = Date.now();
-
-        // Notify others that user is offline
-        socket.broadcast.emit("user-offline", {
-          address: socket.walletAddress,
-          presenceState: "offline",
-          lastSeen: user.lastSeen,
+        // Clear typing status
+        typingStatus.forEach((users, chatId) => {
+          if (users.has(socket.walletAddress)) {
+            users.delete(socket.walletAddress);
+          }
         });
-      }
 
-      // Keep user in map for last seen info, but mark as offline
-      // onlineUsers.delete(socket.walletAddress); // Don't delete immediately
+        groupTypingStatus.forEach((users, groupId) => {
+          if (users.has(socket.walletAddress)) {
+            users.delete(socket.walletAddress);
+            // Notify group that user stopped typing
+            io.to(`group:${groupId}`).emit("group-user-typing", {
+              groupId,
+              user: socket.walletAddress,
+              isTyping: false,
+            });
+          }
+        });
+
+        // Update online status
+        const user = onlineUsers.get(socket.walletAddress);
+        if (user) {
+          user.isOnline = false;
+          user.presenceState = "offline";
+          user.lastSeen = Date.now();
+
+          // Notify others that user is offline
+          socket.broadcast.emit("user-offline", {
+            address: socket.walletAddress,
+            presenceState: "offline",
+            lastSeen: user.lastSeen,
+          });
+        }
+
+        // Keep user in map for last seen info, but mark as offline
+        // onlineUsers.delete(socket.walletAddress); // Don't delete immediately
+      } catch (error) {
+        console.error("❌ Error during disconnect cleanup:", error);
+      }
     }
 
-    console.log(
-      "👥 Online users:",
-      Array.from(onlineUsers.values()).filter((u) => u.isOnline).length
-    );
+    const onlineCount = Array.from(onlineUsers.values()).filter((u) => u.isOnline).length;
+    console.log("👥 Online users:", onlineCount);
   });
 });
 

@@ -21,9 +21,14 @@ export default function Sidebar({
     useWeb3();
   const [searchQuery, setSearchQuery] = useState("");
 
-  const filteredChats = userChats.filter((chat) =>
-    chat.username.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // Filter out deleted chats from localStorage
+  const deletedChats = JSON.parse(localStorage.getItem("deletedChats") || "[]");
+  
+  const filteredChats = userChats
+    .filter((chat) => !deletedChats.includes(chat.address.toLowerCase()))
+    .filter((chat) =>
+      chat.username.toLowerCase().includes(searchQuery.toLowerCase())
+    );
 
   const formatLastSeen = (timestamp: number) => {
     const now = Date.now() / 1000;

@@ -56,6 +56,15 @@ interface LinkItem {
   txHash: string;
 }
 
+interface ChatInfoSidebarExtendedProps extends ChatInfoSidebarProps {
+  messages?: Array<{
+    sender: string;
+    content: string;
+    timestamp: bigint;
+    messageType?: string;
+  }>;
+}
+
 export default function ChatInfoSidebar({
   isOpen,
   onClose,
@@ -70,7 +79,8 @@ export default function ChatInfoSidebar({
   onUnblockUser,
   isMuted,
   isBlocked,
-}: ChatInfoSidebarProps) {
+  messages = [],
+}: ChatInfoSidebarExtendedProps) {
   const [activeTab, setActiveTab] = useState<"media" | "docs" | "links">(
     "media"
   );
@@ -81,16 +91,93 @@ export default function ChatInfoSidebar({
   const [showConfirmBlock, setShowConfirmBlock] = useState(false);
   const [showConfirmClear, setShowConfirmClear] = useState(false);
 
-  // TODO: Load actual media, documents, and links from messages
+  // Extract media, documents, and links from messages
   useEffect(() => {
-    if (isOpen && chatAddress) {
-      // This would be loaded from actual messages
-      // For now, showing empty state
+    if (!isOpen || !chatAddress || !messages.length) {
       setMedia([]);
       setDocuments([]);
       setLinks([]);
+      return;
     }
-  }, [isOpen, chatAddress]);
+
+    const extractedMedia: MediaItem[] = [];
+    const extractedDocs: DocumentItem[] = [];
+    const extractedLinks: LinkItem[] = [];
+
+    // URL regex pattern
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+
+    messages.forEach((msg, index) => {
+      const timestamp = Number(msg.timestamp);
+      const txHash = `msg-${index}-${timestamp}`;
+      const msgType = msg.messageType || "text"; // Default to text if undefined
+
+      // Extract images
+      if (msgType === "image") {
+        try {
+          const fileData = JSON.parse(msg.content);
+          extractedMedia.push({
+            type: "image",
+            url: fileData.data || "",
+            timestamp,
+            txHash,
+          });
+        } catch {
+          // If not JSON, might be old format
+          if (msg.content.includes("data:image")) {
+            extractedMedia.push({
+              type: "image",
+              url: msg.content,
+              timestamp,
+              txHash,
+            });
+          }
+        }
+      }
+
+      // Extract documents/files
+      if (msgType === "file") {
+        try {
+          const fileData = JSON.parse(msg.content);
+          extractedDocs.push({
+            name: fileData.name || "Unknown File",
+            url: fileData.data || "",
+            size: fileData.size || 0,
+            timestamp,
+            txHash,
+          });
+        } catch {
+          // Fallback for old format
+          extractedDocs.push({
+            name: "Document",
+            url: msg.content,
+            size: 0,
+            timestamp,
+            txHash,
+          });
+        }
+      }
+
+      // Extract URLs from text messages (default type or explicit text)
+      if (msgType === "text" || !msg.messageType) {
+        const urls = msg.content.match(urlRegex);
+        if (urls) {
+          urls.forEach((url) => {
+            extractedLinks.push({
+              url,
+              title: url,
+              timestamp,
+              txHash,
+            });
+          });
+        }
+      }
+    });
+
+    setMedia(extractedMedia);
+    setDocuments(extractedDocs);
+    setLinks(extractedLinks);
+  }, [isOpen, chatAddress, messages]);
 
   const handleConfirmDelete = () => {
     onDeleteChat();

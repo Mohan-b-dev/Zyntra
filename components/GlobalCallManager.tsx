@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, createContext, useContext, useCallback, useMemo } from "react";
 import { useWebSocket } from "@/context/WebSocketContext";
 import { useWeb3 } from "@/context/Web3ContextV4";
+import { CallType } from "@/hooks/useCallController";
 import { useCallController } from "@/hooks/useCallController";
-import { useWebRTCEnhanced } from "@/hooks/useWebRTCEnhanced";
+import { useWebRTCEnhanced, CallState, CallInfo } from "@/hooks/useWebRTCEnhanced";
 import IncomingCallBanner from "@/components/IncomingCallBanner";
 import InChatCallPopup from "@/components/InChatCallPopup";
 import CallScreenV2 from "@/components/CallScreenV2";
@@ -12,6 +13,23 @@ import CallScreenV2 from "@/components/CallScreenV2";
 interface GlobalCallManagerProps {
   currentRoute?: string; // 'chat' | 'home' | 'settings' | etc
   currentChatAddress?: string | null; // Which chat is open (if any)
+  children?: React.ReactNode;
+}
+
+interface CallManagerContextValue {
+  startCall: (peer: string, callType: CallType, peerName?: string) => Promise<void>;
+  callState: CallState;
+  callInfo: CallInfo | null;
+}
+
+const CallManagerContext = createContext<CallManagerContextValue | null>(null);
+
+export function useCallManager() {
+  const context = useContext(CallManagerContext);
+  if (!context) {
+    throw new Error("useCallManager must be used within a GlobalCallManager provider");
+  }
+  return context;
 }
 
 /**
@@ -26,6 +44,7 @@ interface GlobalCallManagerProps {
 export default function GlobalCallManager({
   currentRoute = "home",
   currentChatAddress = null,
+  children,
 }: GlobalCallManagerProps) {
   const webSocket = useWebSocket();
   const { account } = useWeb3();
@@ -80,10 +99,39 @@ export default function GlobalCallManager({
     toggleVideo,
     switchCamera,
     toggleSpeaker,
+    startCall: webrtcStartCall,
   } = useWebRTCEnhanced({
     socket: webSocket?.socket || null,
     userAddress: account,
   });
+
+  // Unified startCall function that updates both controller and WebRTC
+  const startCall = useCallback(
+    async (peer: string, callType: CallType, peerName?: string) => {
+      console.log("📞 [GlobalCallManager] Starting call:", { peer, callType, peerName });
+      
+      // Start call controller (UI state)
+      callController.startCall(peer, callType, peerName);
+      
+      // Start WebRTC connection
+      try {
+        await webrtcStartCall(peer, callType);
+      } catch (error) {
+        console.error("❌ [GlobalCallManager] Failed to start call:", error);
+        callController.endCall();
+      }
+    },
+    [callController, webrtcStartCall]
+  );
+
+  const contextValue = useMemo(
+    () => ({
+      startCall,
+      callState: webrtcCallState,
+      callInfo: webrtcCallInfo,
+    }),
+    [startCall, webrtcCallState, webrtcCallInfo]
+  );
 
   // Determine which popup to show based on location and call state
   const shouldShowInChatPopup =
@@ -132,9 +180,10 @@ export default function GlobalCallManager({
   };
 
   return (
-    <>
-      {/* In-Chat Popup - Shows when in any chat during incoming call */}
-      <InChatCallPopup
+    <CallManagerContext.Provider value={contextValue}>
+      <>
+        {/* In-Chat Popup - Shows when in any chat during incoming call */}
+        <InChatCallPopup
         isOpen={shouldShowInChatPopup}
         callerName={
           callController.callInfo?.peerName ||
@@ -184,6 +233,9 @@ export default function GlobalCallManager({
         onToggleSpeaker={toggleSpeaker}
         onSwitchCamera={switchCamera}
       />
-    </>
+
+        {children}
+      </>
+    </CallManagerContext.Provider>
   );
 }

@@ -10,7 +10,7 @@ export type CallState =
   | "ended";
 export type CallType = "voice" | "video";
 
-interface CallInfo {
+export interface CallInfo {
   peer: string;
   type: CallType;
 }
